@@ -23,14 +23,14 @@ contract NFTStakingTest is ERC721Holder, ERC1155Holder, Test {
         erc721.mint(address(this), 1);
         erc721.approve(address(nftStaking), 1);
 
-        NFTStaking.NFTInfo[] memory nfts = new NFTStaking.NFTInfo[](1);
-        nfts[0] = NFTStaking.NFTInfo(address(erc721), 1, 1, true);
+        NFTStaking.NftInput[] memory nfts = new NFTStaking.NftInput[](1);
+        nfts[0] = NFTStaking.NftInput(address(erc721), 1, 1);
 
         nftStaking.stake(nfts);
 
-        NFTStaking.NFTInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
+        NFTStaking.NftInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
         assertEq(stakedNFTs.length, 1);
-        assertEq(stakedNFTs[0].nftContract, address(erc721));
+        assertEq(stakedNFTs[0].contractAddress, address(erc721));
         assertEq(stakedNFTs[0].tokenId, 1);
         assertEq(stakedNFTs[0].amount, 1);
         assertTrue(stakedNFTs[0].isERC721);
@@ -40,32 +40,30 @@ contract NFTStakingTest is ERC721Holder, ERC1155Holder, Test {
         erc1155.mint(address(this), 1, 5);
         erc1155.setApprovalForAll(address(nftStaking), true);
 
-        NFTStaking.NFTInfo[] memory nfts = new NFTStaking.NFTInfo[](1);
-        nfts[0] = NFTStaking.NFTInfo(address(erc1155), 1, 5, false);
+        NFTStaking.NftInput[] memory nfts = new NFTStaking.NftInput[](1);
+        nfts[0] = NFTStaking.NftInput(address(erc1155), 1, 5);
 
         nftStaking.stake(nfts);
 
-        NFTStaking.NFTInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
-        assertEq(stakedNFTs.length, 5);
-        for (uint256 i = 0; i < 5; i++) {
-            assertEq(stakedNFTs[i].nftContract, address(erc1155));
-            assertEq(stakedNFTs[i].tokenId, 1);
-            assertEq(stakedNFTs[i].amount, 1);
-            assertFalse(stakedNFTs[i].isERC721);
-        }
+        NFTStaking.NftInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
+        assertEq(stakedNFTs.length, 1);
+        assertEq(stakedNFTs[0].contractAddress, address(erc1155));
+        assertEq(stakedNFTs[0].tokenId, 1);
+        assertEq(stakedNFTs[0].amount, 5);
+        assertFalse(stakedNFTs[0].isERC721);
     }
 
     function testUnstakeAll() public {
         erc721.mint(address(this), 1);
         erc721.approve(address(nftStaking), 1);
 
-        NFTStaking.NFTInfo[] memory nfts = new NFTStaking.NFTInfo[](1);
-        nfts[0] = NFTStaking.NFTInfo(address(erc721), 1, 1, true);
+        NFTStaking.NftInput[] memory nfts = new NFTStaking.NftInput[](1);
+        nfts[0] = NFTStaking.NftInput(address(erc721), 1, 1);
 
         nftStaking.stake(nfts);
         nftStaking.unstakeAll();
 
-        NFTStaking.NFTInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
+        NFTStaking.NftInfo[] memory stakedNFTs = nftStaking.getStakedNFTs(address(this));
         assertEq(stakedNFTs.length, 0);
     }
 }
