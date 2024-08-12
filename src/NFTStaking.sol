@@ -1,89 +1,145 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 
-contract NFTStaking is ERC721Holder, ERC1155Holder {
-    struct NftInfo {
-        address contractAddress;
-        uint256 tokenId;
-        uint256 amount;
-        bool isERC721;
-    }
-
-    struct NftInput {
+contract NFTStaking is ERC1155Holder {
+    struct Nft {
         address contractAddress;
         uint256 tokenId;
         uint256 amount;
     }
 
-    mapping(address => uint256) public totalStakedCount;
-    mapping(address => uint256) public currentStakedCount;
-    mapping(address => mapping(uint256 => NftInfo)) public stakedNfts;
+    mapping(address => mapping(address => mapping(uint256 => uint256))) private stakedNfts;
 
-    event NftsStaked(address indexed user, NftInput[] nfts);
-    event NftsUnstaked(address indexed user, uint256 amount);
+    mapping(address => address[]) private userTokenContracts;
+    mapping(address => mapping(address => uint256[])) private userTokenIds;
 
-    function stake(NftInput[] calldata _nfts) external {
+    event NftsStaked(address indexed user, Nft[] nfts);
+    event NftsUnstaked(address indexed user, Nft[] nfts);
+
+    function stake(Nft[] calldata _nfts) external {
         require(_nfts.length > 0, "Must stake at least one NFT");
 
         for (uint256 i = 0; i < _nfts.length; i++) {
-            NftInput memory nftInput = _nfts[i];
-            bool isERC721 = IERC165(nftInput.contractAddress).supportsInterface(type(IERC721).interfaceId);
+            Nft memory nft = _nfts[i];
 
-            if (isERC721) {
-                require(nftInput.amount == 1, "ERC721 amount must be 1");
-                IERC721(nftInput.contractAddress).safeTransferFrom(msg.sender, address(this), nftInput.tokenId);
-            } else {
-                require(nftInput.amount > 0, "ERC1155 amount must be greater than 0");
-                IERC1155(nftInput.contractAddress).safeTransferFrom(msg.sender, address(this), nftInput.tokenId, nftInput.amount, "");
+            require(nft.amount > 0, "Amount must be greater than 0");
+
+            IERC1155(nft.contractAddress).safeTransferFrom(
+                msg.sender,
+                address(this),
+                nft.tokenId,
+                nft.amount,
+                ""
+            );
+
+            if (stakedNfts[msg.sender][nft.contractAddress][nft.tokenId] == 0) {
+                userTokenIds[msg.sender][nft.contractAddress].push(nft.tokenId);
+                if (userTokenIds[msg.sender][nft.contractAddress].length == 1) {
+                   userTokenContracts[msg.sender].push(nft.contractAddress);
+                }
             }
 
-            NftInfo memory nftInfo = NftInfo(nftInput.contractAddress, nftInput.tokenId, nftInput.amount, isERC721);
-
-            totalStakedCount[msg.sender]++;
-            currentStakedCount[msg.sender]++;
-            stakedNfts[msg.sender][totalStakedCount[msg.sender]] = nftInfo;
+            stakedNfts[msg.sender][nft.contractAddress][nft.tokenId] += nft.amount;
         }
 
         emit NftsStaked(msg.sender, _nfts);
     }
 
-    function unstakeAll() external {
-        uint256 stakedAmount = currentStakedCount[msg.sender]++;
-        require(stakedAmount > 0, "No NFTs staked");
+    function unstake(Nft[] calldata _nfts) external {
+        require(_nfts.length > 0, "Must unstake at least one NFT");
 
-        for (uint256 i = 0; i < totalStakedCount[msg.sender]; i++) {
-            NftInfo memory nftInfo = stakedNfts[msg.sender][i + 1];
-            if (nftInfo.amount == 0) continue;
-            if (nftInfo.isERC721) {
-                IERC721(nftInfo.contractAddress).safeTransferFrom(address(this), msg.sender, nftInfo.tokenId);
-            } else {
-                IERC1155(nftInfo.contractAddress).safeTransferFrom(address(this), msg.sender, nftInfo.tokenId, nftInfo.amount, "");
+        for (uint256 i = 0; i < _nfts.length; i++) {
+            Nft memory nft = _nfts[i];
+
+            require(nft.amount > 0, "Amount must be greater than 0");
+
+            uint256 stakedNftAmount = stakedNfts[msg.sender][nft.contractAddress][nft.tokenId];
+
+            require(stakedNftAmount >= nft.amount, "Insufficient staked amount");
+
+            stakedNfts[msg.sender][nft.contractAddress][nft.tokenId] -= nft.amount;
+
+            if (stakedNfts[msg.sender][nft.contractAddress][nft.tokenId] == 0) {
+                if (_removeTokenId(msg.sender, nft.contractAddress, nft.tokenId)) {
+                    _removeTokenContract(msg.sender, nft.contractAddress);
+                }
             }
-            delete stakedNfts[msg.sender][i + 1];
+
+            IERC1155(nft.contractAddress).safeTransferFrom(
+                address(this),
+                msg.sender,
+                nft.tokenId,
+                nft.amount,
+                ""
+            );
         }
 
-        emit NftsUnstaked(msg.sender, currentStakedCount[msg.sender]);
-        currentStakedCount[msg.sender] = 0;
+        emit NftsUnstaked(msg.sender, _nfts);
     }
 
-    function getStakedNFTs(address _user) external view returns (NftInfo[] memory) {
-        uint256 stakedAmount = currentStakedCount[_user];
-        NftInfo[] memory nfts = new NftInfo[](stakedAmount);
-        
-        uint256 currentIndex = 0;
+    function _removeTokenId(address _user, address _tokenContract, uint256 _tokenId) internal returns (bool) {
+        uint256[] storage tokenIds = userTokenIds[_user][_tokenContract];
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            if (tokenIds[i] == _tokenId) {
+                tokenIds[i] = tokenIds[tokenIds.length - 1];
+                tokenIds.pop();
+                return tokenIds.length == 0;
+            }
+        }
+        return false;
+    }
 
-        for (uint256 i = 0; i < totalStakedCount[_user]; i++) {
-            NftInfo memory nftInfo = stakedNfts[_user][i + 1];
-            if (nftInfo.amount == 0) continue;
-            nfts[currentIndex] = nftInfo;
-            currentIndex++;
+    function _removeTokenContract(address _user, address _tokenContract) internal {
+        address[] storage tokenContracts = userTokenContracts[_user];
+        for (uint256 i = 0; i < tokenContracts.length; i++) {
+            if (tokenContracts[i] == _tokenContract) {
+                tokenContracts[i] = tokenContracts[tokenContracts.length - 1];
+                tokenContracts.pop();
+                break;
+            }
+        }
+    }
+
+    function getUserTokenIds(address _user, address _tokenContract) external view returns (uint256[] memory) {
+        return userTokenIds[_user][_tokenContract];
+    }
+
+    function getUserTokenContracts(address _user) external view returns (address[] memory) {
+        return userTokenContracts[_user];
+    }
+
+    function getStakedNFTs(address _user) external view returns (Nft[] memory nfts) {
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < userTokenContracts[_user].length; i++) {
+            address tokenContract = userTokenContracts[_user][i];
+            for (uint256 j = 0; j < userTokenIds[_user][tokenContract].length; j++) {
+                uint256 tokenId = userTokenIds[_user][tokenContract][j];
+                if (stakedNfts[_user][tokenContract][tokenId] > 0) {
+                    count++;
+                }
+            }
         }
 
-        return nfts;
+        nfts = new Nft[](count);
+
+        uint256 index = 0;
+        for (uint256 i = 0; i < userTokenContracts[_user].length; i++) {
+            address tokenContract = userTokenContracts[_user][i];
+            for (uint256 j = 0; j < userTokenIds[_user][tokenContract].length; j++) {
+                uint256 tokenId = userTokenIds[_user][tokenContract][j];
+                if (stakedNfts[_user][tokenContract][tokenId] > 0) {
+                    nfts[index] = Nft(
+                        tokenContract,
+                        tokenId,
+                        stakedNfts[_user][tokenContract][tokenId]
+                    );
+                    index++;
+                }
+            }
+        }
     }
 }
